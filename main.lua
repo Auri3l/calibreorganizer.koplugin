@@ -25,7 +25,6 @@ local T = require("ffi/util").template
 local Core = require("organizer_core")
 
 local SETTINGS_KEY = "calibre_organizer"
-local DEFAULT_TEMPLATE = "{series:||/}{series_index:0>2s|| - }{title} - {authors}"
 local DEFAULT_BASE = "documents"
 local METADATA_NAMES = { "metadata.calibre", ".metadata.calibre" }
 
@@ -106,7 +105,6 @@ end
 
 function CalibreOrganizer:init()
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
-    self.settings.template = self.settings.template or DEFAULT_TEMPLATE
     self.settings.base = self.settings.base or DEFAULT_BASE
     if self.settings.remove_empty_dirs == nil then
         self.settings.remove_empty_dirs = true
@@ -159,7 +157,17 @@ function CalibreOrganizer:findMetadata()
     return nil
 end
 
+local NO_TEMPLATE_TEXT = _([[No folder template yet.
+
+Copy it from Calibre so books end up exactly where Calibre puts them:
+Preferences → Plugins → Device interface → Smart Device App Interface (wireless) or the Kindle/Kobo driver (USB) → Customize plugin → Save template.
+
+Then paste it in Calibre organizer → Folder template.]])
+
 function CalibreOrganizer:loadLibrary()
+    if not self.settings.template or self.settings.template == "" then
+        return nil, NO_TEMPLATE_TEXT
+    end
     local json = getJson()
     if not json then
         return nil, _("JSON support (rapidjson) is not available in this KOReader build.")
@@ -261,6 +269,12 @@ end
 function CalibreOrganizer:moveOne(root, from, to)
     local src = root .. "/" .. from
     local dst = root .. "/" .. to
+    local old_sdr = (src:match("^(.*)%.[^./]+$") or src) .. ".sdr"
+    local new_sdr = (dst:match("^(.*)%.[^./]+$") or dst) .. ".sdr"
+    local had_sdr = dirExists(old_sdr)
+    if had_sdr and from:lower() ~= to:lower() and dirExists(new_sdr) then
+        return false, "a notes folder already exists at the target: " .. new_sdr
+    end
     local ok, err = makePath(dirname(dst))
     if not ok then return false, err end
     if from:lower() == to:lower() then
@@ -277,6 +291,10 @@ function CalibreOrganizer:moveOne(root, from, to)
     if not ok then return false, err end
     moveSidecar(src, dst)
     updateHistoryAndCollections(src, dst)
+    if had_sdr and from:lower() ~= to:lower() and not dirExists(new_sdr) then
+        -- The book moved but its notes did not: report it, the old .sdr is still there.
+        return true, "book moved, but its notes/progress folder (.sdr) was not: " .. old_sdr
+    end
     return true
 end
 
@@ -310,6 +328,10 @@ function CalibreOrganizer:applyMoves(lib, moves)
             local book = by_lpath[m.from]
             if book then book.lpath = m.to end
             table.insert(done, { from = m.from, to = m.to })
+            if err then
+                logger.warn("CalibreOrganizer:", err)
+                table.insert(failed, { from = m.from, reason = err })
+            end
         else
             logger.warn("CalibreOrganizer: could not move", m.from, err)
             table.insert(failed, { from = m.from, reason = tostring(err) })
@@ -422,30 +444,33 @@ end
 
 function CalibreOrganizer:editText(title, description, value, default, on_save)
     local dialog
+    local row = {
+        {
+            text = _("Cancel"),
+            id = "close",
+            callback = function() UIManager:close(dialog) end,
+        },
+    }
+    if default then
+        table.insert(row, {
+            text = _("Default"),
+            callback = function() dialog:setInputText(default) end,
+        })
+    end
+    table.insert(row, {
+        text = _("Save"),
+        is_enter_default = true,
+        callback = function()
+            local text = dialog:getInputText()
+            UIManager:close(dialog)
+            on_save(text)
+        end,
+    })
     dialog = InputDialog:new{
         title = title,
         description = description,
         input = value,
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function() UIManager:close(dialog) end,
-            },
-            {
-                text = _("Default"),
-                callback = function() dialog:setInputText(default) end,
-            },
-            {
-                text = _("Save"),
-                is_enter_default = true,
-                callback = function()
-                    local text = dialog:getInputText()
-                    UIManager:close(dialog)
-                    on_save(text)
-                end,
-            },
-        }},
+        buttons = { row },
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
@@ -454,13 +479,18 @@ end
 function CalibreOrganizer:editTemplate(touchmenu_instance)
     self:editText(
         _("Folder template"),
-        _("Calibre-style template, relative to the base folder. Examples:\n{series:||/}{series_index:0>2s|| - }{title}\n{#folder:||/}{series:||/}{title} - {authors}"),
-        self.settings.template, DEFAULT_TEMPLATE,
+        _("Paste the Save template from Calibre: Preferences → Plugins → Device interface → Smart Device App Interface (wireless) or the Kindle/Kobo driver (USB) → Customize plugin."),
+        self.settings.template or "", nil,
         function(text)
-            text = util.trim and util.trim(text) or text
-            if text == "" then text = DEFAULT_TEMPLATE end
-            local _rendered, err = Core.render(text, { title = "Test", authors = { "Author" }, series = "Series", series_index = 1 })
-            if err then return self:showError(T(_("Template error: %1"), err)) end
+            text = text:gsub("^%s+", ""):gsub("%s+$", "")
+            if text == "" then
+                self.settings.template = nil
+                self:saveSettings()
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+                return
+            end
+            local valid, err = Core.validate(text)
+            if not valid then return self:showError(T(_("Template error: %1"), err)) end
             self.settings.template = text
             self:saveSettings()
             if touchmenu_instance then touchmenu_instance:updateItems() end
@@ -530,7 +560,9 @@ function CalibreOrganizer:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text_func = function() return T(_("Folder template: %1"), self.settings.template) end,
+                text_func = function()
+                    return T(_("Folder template: %1"), self.settings.template or _("not set"))
+                end,
                 keep_menu_open = true,
                 callback = function(touchmenu_instance) self:editTemplate(touchmenu_instance) end,
             },

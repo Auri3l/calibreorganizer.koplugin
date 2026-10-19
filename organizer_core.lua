@@ -73,6 +73,8 @@ function Core.getField(book, name)
         return col["#value#"]
     end
     if name == "author" then name = "authors" end
+    -- Calibre's {id} is the book id, stored as application_id on the device.
+    if name == "id" then return book.application_id end
     -- Like Calibre: a series index means nothing without a series.
     if name == "series_index" and isEmpty(book.series) then
         return nil
@@ -175,8 +177,40 @@ local function renderExpr(book, expr)
     return prefix .. str .. suffix
 end
 
+--- Check that a template only uses the supported Calibre syntax.
+--- Returns true, or nil and an error message.
+function Core.validate(template)
+    if type(template) ~= "string" or template:match("^%s*$") then
+        return nil, "template is empty"
+    end
+    if template:match("^%s*program:") or template:match("^%s*python:") then
+        return nil, "Calibre template programs (program:/python:) are not supported"
+    end
+    local depth = 0
+    for ch in template:gmatch("[{}]") do
+        depth = depth + (ch == "{" and 1 or -1)
+        if depth < 0 or depth > 1 then
+            return nil, "unbalanced or nested { } in template"
+        end
+    end
+    if depth ~= 0 then
+        return nil, "unbalanced { } in template"
+    end
+    for expr in template:gmatch("{([^{}]*)}") do
+        if expr:match("^[#%w_]+:'") or expr:match("^[#%w_]+:%s*%w+%(") then
+            return nil, "template functions are not supported: {" .. expr .. "}"
+        end
+        if not expr:match("^[#%w_]+") then
+            return nil, "bad template field: {" .. expr .. "}"
+        end
+    end
+    return true
+end
+
 --- Render a template for a book. Returns the relative path WITHOUT extension.
 function Core.render(template, book)
+    local valid, verr = Core.validate(template)
+    if not valid then return nil, verr end
     local err
     local out = template:gsub("{([^{}]*)}", function(expr)
         local s, e = renderExpr(book, expr)

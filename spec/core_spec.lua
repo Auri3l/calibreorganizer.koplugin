@@ -53,6 +53,19 @@ local cut = Core.render("{title}", { title = long })
 eq("utf8 cut length", #cut <= 120, true)
 eq("utf8 cut valid", cut:sub(-2), "ğ")
 
+-- Calibre's stock device template uses {id}
+eq("id field", Core.render("{title} - {authors} ({id})", { title = "T", authors = { "A" }, application_id = 42 }),
+    "T - A (42)")
+
+-- validation
+eq("valid", Core.validate(TPL), true)
+eq("empty invalid", Core.validate("  "), nil)
+eq("program mode", Core.validate("program: 'x'"), nil)
+eq("function mode", Core.validate("{title:'uppercase($)'}"), nil)
+eq("unbalanced", Core.validate("{title"), nil)
+eq("nested", Core.validate("{a{b}}"), nil)
+eq("render rejects invalid", Core.render("{title:'uppercase($)'}", { title = "x" }), nil)
+
 -- planning
 local files = {}
 local function add(p) files[p:lower()] = true end

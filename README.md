@@ -10,8 +10,25 @@ keeps everything else intact:
   `metadata.calibre`, so Calibre (USB or wireless) still recognises every book
   and does not send it again.
 
+The folder layout comes from **Calibre's own Save template**, which you copy
+into the plugin once, so books end up exactly where Calibre would put them.
+
 Typical use: change a book's series in Calibre, run *Update cached metadata on
 device*, then tap *Organize now* in KOReader. No deleting and re-sending.
+
+## Setup: copy the template from Calibre
+
+Calibre never sends its save template to the device (it only sends finished
+paths when it sends a book), so the plugin cannot ask for it. Copy it once:
+
+1. In Calibre: *Preferences → Plugins → Device interface*, pick the driver you
+   use — **Smart Device App Interface** for KOReader's wireless connection, or
+   the **Kindle / Kobo** driver for USB — and click *Customize plugin*.
+2. Copy the **Save template** field.
+3. In KOReader: *Tools → Calibre organizer → Folder template*, paste, *Save*.
+
+If you use both USB and wireless, set the same template in both Calibre
+drivers. Until a template is set, the plugin does nothing.
 
 ## Install
 
@@ -26,14 +43,14 @@ restart KOReader. The menu entry appears under **Tools → Calibre organizer**.
 | Preview | Lists every planned move, books already in place, and skipped books with the reason. Changes nothing. |
 | Organize now | Asks for confirmation, then moves the books. |
 | Undo last organize | Moves the books of the last run back where they were. |
-| Folder template | Calibre-style template for the folder and file name (see below). |
+| Folder template | The Save template copied from Calibre (see above). Empty by default. |
 | Base folder | Folder the template is relative to. Default: `documents`. |
 | Calibre library folder | Where `metadata.calibre` lives. Automatic by default (KOReader's Calibre inbox folder, home folder, `/mnt/us`, `/mnt/onboard`). Long-press to reset to automatic. |
 | Remove empty folders | Deletes folders left empty after a move. |
 
-## Templates
+## Supported template syntax
 
-The syntax is a subset of Calibre's save templates:
+The plugin understands the usual Calibre save-template syntax:
 
 ```
 {field}                     plain value
@@ -44,20 +61,30 @@ The syntax is a subset of Calibre's save templates:
 
 Fields: any key from the Calibre metadata (`title`, `authors`, `author_sort`,
 `series`, `series_index`, `publisher`, `tags`, …) and custom columns as
-`{#column}`. `series_index` is empty for books without a series, just like in
-Calibre. Format types `s`, `d` and `f` are supported. The file extension is
-always kept.
+`{#column}`; `{id}` is Calibre's book id. `series_index` is empty for books
+without a series, just like in Calibre. Format types `s`, `d` and `f` are
+supported. The file extension is always kept.
+
+Not supported: template functions (`{title:'uppercase($)'}`) and template
+programs (`program:` / `python:`). The plugin refuses such a template instead
+of guessing.
 
 Examples:
 
-| Template | Result |
+| Calibre template | Result |
 | --- | --- |
-| `{series:\|\|/}{series_index:0>2s\|\| - }{title} - {authors}` (default) | `The Horus Heresy/01 - Horus Rising - Dan Abnett.epub` |
+| `{series:\|\|/}{series_index:0>2s\|\| - }{title} - {authors}` | `The Horus Heresy/01 - Horus Rising - Dan Abnett.epub` |
 | `{#folder:\|\|/}{series:\|\|/}{series_index:0>2s\|\| - }{title}` | `Warhammer 40k/The Horus Heresy/01 - Horus Rising.epub` |
-| `{author_sort}/{title}` | `Abnett, Dan/Horus Rising.epub` |
+| `{author_sort}/{title} - {authors}` | `Abnett, Dan/Horus Rising - Dan Abnett.epub` |
 
-Tip: use the same template in Calibre's device driver settings (*Save
-template*), so books Calibre sends later land in the same place.
+## Safety of notes and progress
+
+- A book is only moved together with its `.sdr` folder. If a `.sdr` folder
+  already exists at the target, the book is **not** moved and the preview /
+  result lists why.
+- If a book moved but its `.sdr` could not be moved, this is reported; the old
+  `.sdr` stays where it was, nothing is deleted.
+- *Undo last organize* moves books and their `.sdr` folders back.
 
 ## Notes
 
@@ -89,5 +116,12 @@ kalır, yani kitapları silip yeniden göndermeye gerek yoktur.
 
 Kurulum: `calibreorganizer.koplugin` klasörünü cihazdaki `koreader/plugins/`
 içine kopyala ve KOReader'ı yeniden başlat. Menü: **Araçlar → Calibre organizer**.
+
+Klasör düzenini Calibre'nin kendi şablonu belirler: Calibre'de *Tercihler →
+Eklentiler → Device interface → Smart Device App Interface* (kablosuz) ya da
+Kindle sürücüsü (USB) → *Customize plugin* → **Save template** alanını kopyala,
+eklentide *Folder template*'e yapıştır. Şablon girilmeden eklenti çalışmaz.
+
 Önce *Preview* ile ne yapılacağına bak, sonra *Organize now* de. Beğenmezsen
-*Undo last organize* ile geri alabilirsin.
+*Undo last organize* ile geri alabilirsin. Hedefte zaten bir `.sdr` varsa kitap
+taşınmaz, notların üzerine asla yazılmaz.
